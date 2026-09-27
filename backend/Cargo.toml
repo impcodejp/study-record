@@ -29,3 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+# Windows サービスとして動かすための依存（Windows でだけ使う）
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"

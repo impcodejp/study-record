@@ -23,11 +23,13 @@ ProjectRoot/
 │  ├─ src/infrastructure/   DB・メール・設定・ログ
 │  ├─ src/presentation/     HTTP API（入出力の変換だけ）
 │  ├─ src/bin/              管理ツール（create_user / import_legacy）
+│  ├─ src/service_host.rs   Windows サービスとしての登録・起動・停止
 │  └─ tests/                API の結合テスト
 ├─ frontend/                画面（React）
 │  └─ src/{api,hooks,components,pages,utils}
 ├─ config/app.ini.example   設定ファイルの見本
-├─ nginx/study-record.conf  nginx の設定の見本
+├─ nginx/                   nginx の設定の見本（http 版・HTTPS 版）と証明書更新後のスクリプト
+├─ deploy/                  Ubuntu（systemd）用のサービス設定の見本
 └─ docs/仕様書.md
 ```
 
@@ -152,11 +154,58 @@ certbot は自動更新のタイマーを登録します。`sudo certbot renew -
 
 ### 4. API サーバーを常駐させる
 
-- Windows：`ProjectRoot` をカレントフォルダにして `backend\target\release\study-record-server.exe` を起動する。
-  常駐させる場合は NSSM やタスク スケジューラ（起動時に実行）を使う
-- Ubuntu：systemd のサービスとして登録する（`WorkingDirectory` を `ProjectRoot` にする）
+#### Windows（exe 自身をサービスとして登録する）
 
-停止は Ctrl+C（Linux では SIGTERM）。処理中の要求を終えてから止まります。
+exe は単体で動きます（SQLite を内蔵し、Visual C++ の実行用ファイルも取り込み済みのため、追加のインストールは不要）。
+サービスとして動くときは、**ホームフォルダ**（既定は exe のあるフォルダ）を作業フォルダにし、
+設定・データ・ログはすべてその中に置きます。
+
+1. ホームフォルダを作り、exe と設定ファイルを置く
+   ```text
+   C:\study-record\
+   ├─ study-record-server.exe      （backend\target\release からコピー）
+   ├─ config\app.ini               （config\app.ini.example をコピーして編集）
+   ├─ data\                        （install 時に自動で作成）
+   └─ logs\SystemRunningLog.log    （install 時に自動で作成）
+   ```
+   旧データの取り込みやユーザー作成をする場合は、`import_legacy.exe` / `create_user.exe` も同じフォルダに置き、
+   そのフォルダで実行します（同じ `config\app.ini` を使うため）。
+2. **管理者として開いた** PowerShell で登録する
+   ```powershell
+   cd C:\study-record
+   .\study-record-server.exe install
+   # ホームフォルダを exe と別の場所にする場合
+   .\study-record-server.exe install --home D:\study-record-data
+   ```
+   登録の内容：
+   - サービス名 `StudyRecordServer`、Windows の起動時に自動で開始する
+   - 権限の低い組み込みアカウント **LocalService** で動かす（書き込み権限は `data` と `logs` だけに与える）
+   - 異常終了したら 10 秒後に自動で再起動する（3 回まで。24 時間で回数を数え直す）
+3. 開始・停止・状態の確認
+   ```powershell
+   sc start StudyRecordServer
+   sc stop StudyRecordServer       # 処理中の要求を終えてから止まる
+   sc query StudyRecordServer
+   ```
+   「サービス」画面（services.msc）からも操作できます。起動できないときは `logs\SystemRunningLog.log` を確認してください。
+4. SMTP のパスワードの渡し方（どちらか）
+   - `config\app.ini` に書き、ファイルを管理者とサービスだけが読めるようにする
+     ```powershell
+     icacls C:\study-record\config\app.ini /inheritance:r /grant "*S-1-5-32-544:F" "*S-1-5-19:R"
+     ```
+   - サービス専用の環境変数として登録する（再起動後に有効）
+     ```powershell
+     reg add HKLM\SYSTEM\CurrentControlSet\Services\StudyRecordServer /v Environment /t REG_MULTI_SZ /d "APP_SMTP_PASSWORD=ここにパスワード" /f
+     sc stop StudyRecordServer; sc start StudyRecordServer
+     ```
+5. exe を新しい版に入れ替えるときは、`sc stop` → exe を上書き → `sc start`。
+   登録を解除するときは `.\study-record-server.exe uninstall`（データとログは残ります）。
+
+#### Ubuntu（systemd）
+
+`deploy/study-record.service` を使います（手順はファイルの先頭に記載）。
+ホームフォルダは `/opt/study-record`、SMTP のパスワードは `/etc/study-record/env`（root だけが読めるファイル）に
+`APP_SMTP_PASSWORD=...` の形で書きます。停止時は SIGTERM を受けて、処理中の要求を終えてから止まります。
 
 ### 5. 公開後の確認
 

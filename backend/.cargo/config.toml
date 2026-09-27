@@ -1,0 +1,4 @@
+# Windows（MSVC）向けのビルドでは C ランタイムを exe に静的に取り込む。
+# サーバー用 PC に Visual C++ 再頒布可能パッケージ（VCRUNTIME140.dll）を入れなくても起動できるようにするため。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

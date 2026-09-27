@@ -1,0 +1,38 @@
+# =====================================================================
+# 資格勉強回答正誤記録アプリ API サーバーの systemd 設定（Ubuntu 用の見本）
+#
+# 配置と有効化：
+#   sudo useradd --system --home /opt/study-record --shell /usr/sbin/nologin studyrecord
+#   sudo cp deploy/study-record.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now study-record
+# 状態の確認： systemctl status study-record
+# =====================================================================
+[Unit]
+Description=Study Record API server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=studyrecord
+Group=studyrecord
+# ホームフォルダ（config / data / logs を置く場所）
+WorkingDirectory=/opt/study-record
+ExecStart=/opt/study-record/study-record-server
+# SMTP のパスワードなどは、root だけが読めるファイルから環境変数として渡す
+EnvironmentFile=-/etc/study-record/env
+Restart=on-failure
+RestartSec=10
+# 停止時は SIGTERM を送り、処理中の要求が終わるまで最大 30 秒待つ
+TimeoutStopSec=30
+
+# 権限を絞る（書き込みは data / logs だけ）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/study-record/data /opt/study-record/logs
+
+[Install]
+WantedBy=multi-user.target
