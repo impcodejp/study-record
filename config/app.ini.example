@@ -1,0 +1,60 @@
+; =====================================================================
+; 資格勉強回答正誤記録アプリ API サーバーの設定ファイル（見本）
+;
+; このファイルを app.ini という名前でコピーして使う。
+;   copy config\app.ini.example config\app.ini
+;
+; ・app.ini には認証情報を書くため、Git には登録しない（.gitignore 済み）
+; ・すべての項目は環境変数 APP_<セクション>_<キー> で上書きできる
+;     例）APP_SMTP_PASSWORD=xxxx
+; ・パスワード類は環境変数で渡す運用を推奨する
+; ・パスは API サーバーを起動したフォルダからの相対パス
+; =====================================================================
+
+[server]
+; 待ち受けアドレス。nginx の背後に置く場合は 127.0.0.1 のままにする
+bind = 127.0.0.1:8080
+; メール本文のリンクに使う公開 URL（末尾の / は不要）
+;   開発時（Vite）: http://localhost:5173
+;   本番（nginx）: https://study.example.com
+public_url = http://localhost:5173
+; HTTPS で運用する場合は true（Cookie に Secure 属性を付ける）。インターネット公開時は必ず true
+cookie_secure = false
+; nginx の X-Real-IP を接続元 IP として信頼するか（nginx の背後に置く場合は true）
+trust_proxy = false
+
+[database]
+; SQLite ファイルのパス
+path = data/study_record.sqlite3
+
+[log]
+; ログファイル（約 2MB で SystemRunningLog1.log に切り替え、1 世代だけ残す）
+path = logs/SystemRunningLog.log
+max_bytes = 2097152
+backups = 1
+; ログレベル（error / warn / info / debug / trace）。モジュール単位の指定も可
+;   例）info,sqlx=warn
+level = info,sqlx=warn
+
+[auth]
+; ログインの有効時間（時間）
+session_ttl_hours = 168
+; 新規登録の確認リンクの有効時間（分）
+verify_token_ttl_minutes = 1440
+; パスワード再設定リンクの有効時間（分）
+reset_token_ttl_minutes = 30
+; ログイン失敗を何回で一時ロックするか／ロック時間（分）
+login_max_failures = 5
+login_lock_minutes = 15
+
+[smtp]
+; host を空にするとメール送信は無効（新規登録・パスワード再設定が使えない）
+host =
+port = 587
+; starttls / tls / none
+security = starttls
+username =
+; パスワードはここに書かず、環境変数 APP_SMTP_PASSWORD で渡すことを推奨
+password =
+; 差出人（例：学習記録 <noreply@example.com>）
+from =

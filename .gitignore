@@ -1,0 +1,14 @@
+# 認証情報を含む設定ファイル（見本の app.ini.example だけを登録する）
+config/app.ini
+
+# 実行時に作られるデータ・ログ
+data/
+logs/
+*.log
+*.sqlite3
+*.sqlite3-*
+
+# ビルド結果・依存パッケージ
+backend/target/
+frontend/node_modules/
+frontend/dist/
