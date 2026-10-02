@@ -12,7 +12,7 @@ use crate::{
     application::review_service::QuestionFilter,
     domain::{
         error::AppError,
-        models::{Attempt, Dashboard, QuestionItem},
+        models::{Attempt, Dashboard, NoteItem, QuestionItem},
         time::now_jst,
     },
     presentation::{
@@ -26,7 +26,8 @@ use crate::{
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestionsQuery {
-    /// `review` を指定すると復習一覧（最新が不正解の問題だけ）。
+    /// `review` を指定すると復習一覧（最新が不正解の問題だけ）、
+    /// `due` を指定すると今日の復習（忘却曲線にもとづく復習日が来ている問題だけ）。
     filter: Option<String>,
     /// 指定するとそのカテゴリの問題だけ。
     category_id: Option<i64>,
@@ -76,6 +77,7 @@ pub async fn questions(
     let filter = match (query.filter.as_deref(), query.category_id) {
         (_, Some(category_id)) => QuestionFilter::Category(category_id),
         (Some("review"), None) => QuestionFilter::Review,
+        (Some("due"), None) => QuestionFilter::Due,
         (None | Some("") | Some("all"), None) => QuestionFilter::All,
         (Some(_), None) => {
             return Err(ApiError(AppError::Validation("絞り込み条件が正しくありません。".into())))
@@ -97,6 +99,15 @@ pub async fn history(
             .history(auth.user.id, exam_id, &query.title, query.question_number)
             .await?,
     ))
+}
+
+/// `GET /api/exams/{examId}/notes` 見直しノート（正解・メモを残した回答）。
+pub async fn notes(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(exam_id): Path<i64>,
+) -> ApiResult<Json<Vec<NoteItem>>> {
+    Ok(Json(state.reviews.notes(auth.user.id, exam_id).await?))
 }
 
 /// `GET /api/exams/{examId}/export` 採点済み回答の CSV 出力。

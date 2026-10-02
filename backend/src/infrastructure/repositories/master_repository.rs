@@ -13,6 +13,8 @@ struct ExamRow {
     created_at: String,
     practice_count: i64,
     answer_count: i64,
+    exam_date: Option<String>,
+    daily_goal: Option<i64>,
 }
 
 impl From<ExamRow> for Exam {
@@ -24,6 +26,8 @@ impl From<ExamRow> for Exam {
             created_at: row.created_at,
             practice_count: row.practice_count,
             answer_count: row.answer_count,
+            exam_date: row.exam_date,
+            daily_goal: row.daily_goal,
         }
     }
 }
@@ -57,7 +61,7 @@ impl From<CategoryRow> for Category {
 /// ユーザーの試験を並び順→ID 順で返す。
 pub async fn list_exams(conn: &mut SqliteConnection, user_id: i64) -> sqlx::Result<Vec<Exam>> {
     let rows: Vec<ExamRow> = sqlx::query_as(
-        "SELECT e.id, e.name, e.sort_order, e.created_at,
+        "SELECT e.id, e.name, e.sort_order, e.created_at, e.exam_date, e.daily_goal,
                 (SELECT COUNT(*) FROM practices p WHERE p.exam_id = e.id) AS practice_count,
                 (SELECT COUNT(*) FROM answers a JOIN practices p ON p.id = a.practice_id
                   WHERE p.exam_id = e.id AND a.correct IS NOT NULL) AS answer_count
@@ -125,6 +129,33 @@ pub async fn insert_exam(
 pub async fn rename_exam(conn: &mut SqliteConnection, exam_id: i64, name: &str) -> sqlx::Result<()> {
     sqlx::query("UPDATE exams SET name = ? WHERE id = ?")
         .bind(name)
+        .bind(exam_id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+/// 試験の学習目標（試験日・1 日の目標問題数）を返す。試験が無ければ `None`。
+pub async fn find_exam_goal(
+    conn: &mut SqliteConnection,
+    exam_id: i64,
+) -> sqlx::Result<Option<(Option<String>, Option<i64>)>> {
+    sqlx::query_as("SELECT exam_date, daily_goal FROM exams WHERE id = ?")
+        .bind(exam_id)
+        .fetch_optional(conn)
+        .await
+}
+
+/// 試験の学習目標（試験日 `YYYY-MM-DD`・1 日の目標問題数）を更新する。`None` は未設定に戻す。
+pub async fn update_exam_goal(
+    conn: &mut SqliteConnection,
+    exam_id: i64,
+    exam_date: Option<&str>,
+    daily_goal: Option<i64>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE exams SET exam_date = ?, daily_goal = ? WHERE id = ?")
+        .bind(exam_date)
+        .bind(daily_goal)
         .bind(exam_id)
         .execute(conn)
         .await?;

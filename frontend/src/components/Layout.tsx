@@ -19,6 +19,7 @@ const EXAM_MENU = [
   { to: 'practices', label: '学習履歴' },
   { to: 'questions', label: '問題一覧' },
   { to: 'review', label: '復習' },
+  { to: 'notes', label: '見直しノート' },
   { to: 'categories', label: 'カテゴリ' },
 ]
 

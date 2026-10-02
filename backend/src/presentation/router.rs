@@ -30,6 +30,7 @@ pub fn build(state: AppState) -> Router {
     let exam_routes = Router::new()
         .route("/", get(exams::list_exams).post(exams::create_exam))
         .route("/{exam_id}", put(exams::rename_exam).delete(exams::delete_exam))
+        .route("/{exam_id}/goal", put(exams::update_goal))
         .route(
             "/{exam_id}/categories",
             get(exams::list_categories).post(exams::add_category),
@@ -46,6 +47,7 @@ pub fn build(state: AppState) -> Router {
         .route("/{exam_id}/dashboard", get(review::dashboard))
         .route("/{exam_id}/questions", get(review::questions))
         .route("/{exam_id}/history", get(review::history))
+        .route("/{exam_id}/notes", get(review::notes))
         .route("/{exam_id}/export", get(review::export_csv));
 
     let practice_routes = Router::new()
@@ -66,6 +68,7 @@ pub fn build(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health::health))
         .route("/active", get(practices::active))
+        .route("/exam-templates", get(exams::list_templates))
         .nest("/auth", auth_routes)
         .nest("/exams", exam_routes)
         .nest("/practices", practice_routes)

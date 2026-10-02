@@ -22,6 +22,9 @@ import {
 } from './pages/AuthPages'
 import { DashboardPage } from './pages/DashboardPage'
 import { CategoriesPage, ExamsPage, HomeRedirect } from './pages/MasterPages'
+import { LandingPage } from './pages/LandingPage'
+import { NotesPage } from './pages/NotesPage'
+import { SetupPage } from './pages/SetupPage'
 import { HistoryPage, PracticeDetailPage, PracticeListPage, QuestionsPage, ResultPage } from './pages/ReviewPages'
 import { SessionPage } from './pages/SessionPage'
 import { StartPage } from './pages/StartPage'
@@ -33,6 +36,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           {/* ログイン前の画面 */}
+          <Route path="/welcome" element={<GuestOnly><LandingPage /></GuestOnly>} />
           <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
           <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
           <Route path="/forgot-password" element={<GuestOnly><ForgotPasswordPage /></GuestOnly>} />
@@ -43,6 +47,7 @@ export default function App() {
           {/* ログイン後の画面 */}
           <Route element={<RequireAuth><Layout /></RequireAuth>}>
             <Route index element={<HomeRedirect />} />
+            <Route path="setup" element={<SetupPage />} />
             <Route path="exams" element={<ExamsPage />} />
             <Route path="exams/:examId">
               <Route index element={<DashboardPage />} />
@@ -52,6 +57,7 @@ export default function App() {
               <Route path="questions" element={<QuestionsPage />} />
               <Route path="review" element={<QuestionsPage review />} />
               <Route path="history" element={<HistoryPage />} />
+              <Route path="notes" element={<NotesPage />} />
               <Route path="categories" element={<CategoriesPage />} />
             </Route>
             <Route path="session" element={<SessionPage />} />

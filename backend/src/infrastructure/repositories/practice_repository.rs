@@ -6,7 +6,7 @@
 use sqlx::{FromRow, SqliteConnection};
 
 use crate::domain::{
-    models::{Answer, Attempt, PracticeSummary, QuestionItem},
+    models::{Answer, Attempt, NoteItem, PracticeSummary},
     time::utc_string_to_jst_string,
 };
 
@@ -59,17 +59,42 @@ impl From<AnswerRow> for Answer {
     }
 }
 
-/// 問題一覧の行。
+/// 問題一覧の行（問題名称＋問題数ごとの最新の採点結果と回数）。
+///
+/// 習熟度・次の復習日はアプリケーション層で正誤の履歴から求める。
 #[derive(Debug, FromRow)]
-struct QuestionRow {
-    title: String,
-    question_number: i64,
-    area: String,
-    response: String,
-    answered_at: String,
-    correct: bool,
-    attempt_count: i64,
-    correct_count: i64,
+pub struct QuestionRecord {
+    /// 問題名称。
+    pub title: String,
+    /// 問題数。
+    pub question_number: i64,
+    /// 最新回答のカテゴリ名。
+    pub area: String,
+    /// 最新の回答。
+    pub response: String,
+    /// 最終回答日時（UTC）。
+    pub answered_at: String,
+    /// 最新の正誤。
+    pub correct: bool,
+    /// 回答回数。
+    pub attempt_count: i64,
+    /// 正解した回数。
+    pub correct_count: i64,
+    /// 平均回答時間（秒）。
+    pub average_seconds: f64,
+}
+
+/// 採点済みの回答 1 件分の正誤（習熟度の計算用）。
+#[derive(Debug, FromRow)]
+pub struct ResultRecord {
+    /// 問題名称。
+    pub title: String,
+    /// 問題数。
+    pub question_number: i64,
+    /// 正誤。
+    pub correct: bool,
+    /// 回答日時（UTC。準備度の推移の計算用）。
+    pub answered_at: String,
 }
 
 /// 正誤履歴の行。
@@ -433,38 +458,55 @@ pub async fn delete_ungraded(conn: &mut SqliteConnection, practice_id: i64) -> s
 pub async fn list_questions(
     conn: &mut SqliteConnection,
     exam_id: i64,
-) -> sqlx::Result<Vec<QuestionItem>> {
-    let rows: Vec<QuestionRow> = sqlx::query_as(
+) -> sqlx::Result<Vec<QuestionRecord>> {
+    sqlx::query_as(
         "WITH graded AS (
              SELECT a.* FROM answers a JOIN practices p ON p.id = a.practice_id
               WHERE p.exam_id = ? AND a.correct IS NOT NULL
          ),
          grouped AS (
              SELECT title, question_number, MAX(id) AS last_id,
-                    COUNT(*) AS attempt_count, SUM(correct) AS correct_count
+                    COUNT(*) AS attempt_count, SUM(correct) AS correct_count,
+                    AVG(elapsed_seconds) AS average_seconds
                FROM graded GROUP BY title, question_number
          )
          SELECT g.title, g.question_number, a.area, a.response, a.answered_at, a.correct,
-                g.attempt_count, g.correct_count
+                g.attempt_count, g.correct_count, g.average_seconds
            FROM grouped g JOIN answers a ON a.id = g.last_id
           ORDER BY a.answered_at DESC, a.id DESC",
     )
     .bind(exam_id)
     .fetch_all(conn)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| QuestionItem {
-            title: row.title,
-            question_number: row.question_number,
-            area: row.area,
-            response: row.response,
-            answered_at: utc_string_to_jst_string(&row.answered_at),
-            correct: row.correct,
-            attempt_count: row.attempt_count,
-            correct_count: row.correct_count,
-        })
-        .collect())
+    .await
+}
+
+/// 試験の採点済み回答の正誤を、問題ごとに記録順（古い順）で返す（習熟度の計算用）。
+pub async fn list_results(
+    conn: &mut SqliteConnection,
+    exam_id: i64,
+) -> sqlx::Result<Vec<ResultRecord>> {
+    sqlx::query_as(
+        "SELECT a.title, a.question_number, a.correct, a.answered_at
+           FROM answers a JOIN practices p ON p.id = a.practice_id
+          WHERE p.exam_id = ? AND a.correct IS NOT NULL
+          ORDER BY a.title, a.question_number, a.id",
+    )
+    .bind(exam_id)
+    .fetch_all(conn)
+    .await
+}
+
+/// 試験で採点済みの回答がある日（日本時間、`YYYY-MM-DD`）を古い順に返す（連続学習日数の計算用）。
+pub async fn study_days(conn: &mut SqliteConnection, exam_id: i64) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT date(a.answered_at, '+9 hours') AS day
+           FROM answers a JOIN practices p ON p.id = a.practice_id
+          WHERE p.exam_id = ? AND a.correct IS NOT NULL
+          ORDER BY day",
+    )
+    .bind(exam_id)
+    .fetch_all(conn)
+    .await
 }
 
 /// 試験の「問題名称＋問題数」の採点済み回答を、学習をまたいで新しい順に返す（F-16）。
@@ -498,6 +540,51 @@ pub async fn list_attempts(
             correct: row.correct,
             correct_answer: row.correct_answer,
             note: row.note,
+        })
+        .collect())
+}
+
+/// 見直しノートの行。
+#[derive(Debug, FromRow)]
+struct NoteRow {
+    id: i64,
+    practice_id: i64,
+    title: String,
+    question_number: i64,
+    area: String,
+    response: String,
+    correct: bool,
+    correct_answer: Option<String>,
+    note: Option<String>,
+    answered_at: String,
+}
+
+/// 正解またはメモを残した採点済みの回答を、新しい順に返す（見直しノート）。
+pub async fn list_notes(conn: &mut SqliteConnection, exam_id: i64) -> sqlx::Result<Vec<NoteItem>> {
+    let rows: Vec<NoteRow> = sqlx::query_as(
+        "SELECT a.id, a.practice_id, a.title, a.question_number, a.area, a.response, a.correct,
+                a.correct_answer, a.note, a.answered_at
+           FROM answers a JOIN practices p ON p.id = a.practice_id
+          WHERE p.exam_id = ? AND a.correct IS NOT NULL
+            AND (a.correct_answer IS NOT NULL OR a.note IS NOT NULL)
+          ORDER BY a.answered_at DESC, a.id DESC",
+    )
+    .bind(exam_id)
+    .fetch_all(conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| NoteItem {
+            answer_id: row.id,
+            practice_id: row.practice_id,
+            title: row.title,
+            question_number: row.question_number,
+            area: row.area,
+            response: row.response,
+            correct: row.correct,
+            correct_answer: row.correct_answer,
+            note: row.note,
+            answered_at: utc_string_to_jst_string(&row.answered_at),
         })
         .collect())
 }

@@ -37,3 +37,11 @@ export function formatShortDate(value: string): string {
 export function formatCount(value: number): string {
   return value.toLocaleString('ja-JP')
 }
+
+/** 今日の日付（端末の時刻、YYYY-MM-DD）を返す。復習日との比較に使う。 */
+export function todayString(): string {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}

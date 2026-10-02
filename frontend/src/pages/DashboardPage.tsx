@@ -1,11 +1,12 @@
 /**
- * ダッシュボード（F-08〜F-10）。
+ * ダッシュボード（F-08〜F-10、今日やること、合格準備度、学習カレンダー、苦手なカテゴリ、実績）。
  */
 
 import { Link, useNavigate } from 'react-router-dom'
 
-import { examApi, reviewApi } from '../api/endpoints'
+import { examApi, reviewApi, type GoalInput } from '../api/endpoints'
 import { AreaChart, DailyChart } from '../components/Charts'
+import { AchievementsCard, ReadinessCard, StudyHeatmap, TodayPanel, WeakAreas } from '../components/StudyPlan'
 import { Loading, Notice, PageHeader } from '../components/ui'
 import { useExamId } from '../hooks/useExamId'
 import { useLoad } from '../hooks/useLoad'
@@ -29,6 +30,12 @@ export function DashboardPage() {
     if (category) navigate(`/exams/${examId}/questions?categoryId=${category.id}`)
   }
 
+  /** 学習目標を保存し、集計を読み込み直す（失敗時は呼び出し元のフォームがエラーを表示する）。 */
+  const saveGoal = async (goal: GoalInput) => {
+    await examApi.updateGoal(examId, goal)
+    dashboard.reload()
+  }
+
   return (
     <div>
       <PageHeader
@@ -44,6 +51,8 @@ export function DashboardPage() {
           </>
         }
       />
+      <TodayPanel examId={examId} today={d.today} onSaveGoal={saveGoal} />
+      <ReadinessCard readiness={d.readiness} daysUntilExam={d.today.daysUntilExam} />
       <section className="stats" aria-label="累計">
         <div className="stat hero">
           <span className="stat-label">正答率</span>
@@ -71,6 +80,15 @@ export function DashboardPage() {
         </section>
         <section className="card">
           <AreaChart data={d.areaStats} onSelect={(stat) => openCategory(stat.area)} />
+        </section>
+      </div>
+      <div className="chart-grid chart-grid-2">
+        <section className="card">
+          <StudyHeatmap data={d.heatmap} dailyGoal={d.today.dailyGoal} />
+        </section>
+        <section className="card stack-card">
+          <WeakAreas stats={d.areaStats} onSelect={(stat) => openCategory(stat.area)} />
+          <AchievementsCard dashboard={d} />
         </section>
       </div>
     </div>

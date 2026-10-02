@@ -10,6 +10,8 @@ import type {
   Category,
   Dashboard,
   Exam,
+  ExamTemplate,
+  NoteItem,
   Practice,
   PracticeSummary,
   QuestionItem,
@@ -34,7 +36,17 @@ export interface GradeInput {
 }
 
 /** 問題一覧の絞り込み。 */
-export type QuestionFilter = { kind: 'all' } | { kind: 'review' } | { kind: 'category'; categoryId: number }
+export type QuestionFilter =
+  | { kind: 'all' }
+  | { kind: 'review' }
+  | { kind: 'due' }
+  | { kind: 'category'; categoryId: number }
+
+/** 学習目標の入力。null は未設定に戻す。 */
+export interface GoalInput {
+  examDate: string | null
+  dailyGoal: number | null
+}
 
 /** メール送信系 API の応答。 */
 interface MessageResponse {
@@ -68,10 +80,14 @@ export const authApi = {
 /** 試験・カテゴリの API。 */
 export const examApi = {
   list: () => request<Exam[]>('/api/exams'),
-  create: (name: string) => request<Exam[]>('/api/exams', { method: 'POST', body: { name } }),
+  templates: () => request<ExamTemplate[]>('/api/exam-templates'),
+  create: (name: string, templateKey?: string) =>
+    request<Exam[]>('/api/exams', { method: 'POST', body: { name, templateKey } }),
   rename: (examId: number, name: string) =>
     request<Exam[]>(`/api/exams/${examId}`, { method: 'PUT', body: { name } }),
   remove: (examId: number) => request<Exam[]>(`/api/exams/${examId}`, { method: 'DELETE' }),
+  updateGoal: (examId: number, goal: GoalInput) =>
+    request<Exam[]>(`/api/exams/${examId}/goal`, { method: 'PUT', body: goal }),
 
   categories: (examId: number) => request<Category[]>(`/api/exams/${examId}/categories`),
   addCategory: (examId: number, name: string) =>
@@ -109,8 +125,8 @@ export const reviewApi = {
   dashboard: (examId: number) => request<Dashboard>(`/api/exams/${examId}/dashboard`),
   questions: (examId: number, filter: QuestionFilter) => {
     const params =
-      filter.kind === 'review'
-        ? { filter: 'review' }
+      filter.kind === 'review' || filter.kind === 'due'
+        ? { filter: filter.kind }
         : filter.kind === 'category'
           ? { categoryId: filter.categoryId }
           : {}
@@ -118,6 +134,7 @@ export const reviewApi = {
   },
   history: (examId: number, title: string, questionNumber: number) =>
     request<Attempt[]>(`/api/exams/${examId}/history${query({ title, questionNumber })}`),
+  notes: (examId: number) => request<NoteItem[]>(`/api/exams/${examId}/notes`),
   exportUrl: (examId: number) => `/api/exams/${examId}/export`,
   changeCategory: (answerId: number, categoryId: number) =>
     request<void>(`/api/answers/${answerId}/category`, { method: 'PUT', body: { categoryId } }),

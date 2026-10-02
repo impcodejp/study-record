@@ -4,6 +4,7 @@
  * - 回答の記録：問題名称・問題数・カテゴリ・回答（自由記述、改行可）と、自動計測の回答時間
  * - 採点：未採点の回答を記録順に 1 件ずつ正解／不正解にする。最後の 1 件で学習が完了する
  * - 画面を開き直した場合は、回答の記録から再開する（F-04）
+ * - まとめて復習（復習画面から開始）では、復習リストの問題を 1 問ずつ問題名称・問題数・カテゴリに入れる
  */
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
@@ -16,6 +17,7 @@ import { Loading, MultilineText, Notice, ResultBadge } from '../components/ui'
 import { useApp } from '../hooks/useApp'
 import { useTimer } from '../hooks/useTimer'
 import { formatSeconds } from '../utils/format'
+import { queueKey, queueProgress, readReviewQueue, type QueueItem } from '../utils/reviewQueue'
 import { readSessionStart } from '../utils/session'
 
 /** 回答の最大文字数（サーバー側の検証と合わせる）。 */
@@ -150,14 +152,29 @@ export function SessionPage() {
   )
 }
 
-/** 再開時・開始時のフォームの初期値を作る（F-04）。 */
+/** 復習リストの問題をフォームの値にする（カテゴリがマスタに無ければ先頭のカテゴリ）。 */
+function formFromQueue(item: QueueItem, categories: Category[]): AnswerForm {
+  return {
+    title: item.title,
+    questionNumber: String(item.questionNumber),
+    area: categories.some((c) => c.name === item.area) ? item.area : (categories[0]?.name ?? ''),
+    response: '',
+  }
+}
+
+/** 再開時・開始時のフォームの初期値を作る（F-04）。まとめて復習中は、リストの次の問題を入れる。 */
 function initialForm(practice: Practice, categories: Category[]): AnswerForm {
+  const queue = readReviewQueue(practice.id)
+  const next = queue ? queueProgress(practice, queue).next : null
+  if (next) return formFromQueue(next, categories)
   const last = practice.answers[practice.answers.length - 1]
-  const firstNumber = readSessionStart(practice.id)
+  const start = readSessionStart(practice.id)
+  // 「解き直す」から始めた最初の 1 問は、前回のカテゴリを選んでおく（マスタに無ければ先頭）。
+  const retryArea = !last && start?.area && categories.some((c) => c.name === start.area) ? start.area : null
   return {
     title: last?.title ?? practice.title,
-    questionNumber: last ? String(last.questionNumber + 1) : firstNumber ? String(firstNumber) : '',
-    area: categories[0]?.name ?? '',
+    questionNumber: last ? String(last.questionNumber + 1) : start ? String(start.firstNumber) : '',
+    area: retryArea ?? categories[0]?.name ?? '',
     response: '',
   }
 }
@@ -175,12 +192,28 @@ function AnswerView({
   onGoGrade: () => void
 }) {
   const timer = useTimer()
+  // まとめて復習の問題リスト（ふつうの学習なら null）。学習中は変わらないため最初に 1 回だけ読む。
+  const [queue] = useState(() => readReviewQueue(practice.id))
+  // 「とばす」を選んだ問題（この画面を開いている間だけ覚える）。
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set())
+  const progress = queue ? queueProgress(practice, queue, skipped) : null
   const [form, setForm] = useState<AnswerForm>(() => initialForm(practice, categories))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const responseRef = useRef<HTMLTextAreaElement>(null)
 
   const update = (patch: Partial<AnswerForm>) => setForm((f) => ({ ...f, ...patch }))
+
+  /** 復習リストの今の問題をとばし、次の問題を入れる（手元に問題が無いときなど）。 */
+  const skip = () => {
+    if (!queue || !progress?.next) return
+    const nextSkipped = new Set(skipped).add(queueKey(progress.next))
+    setSkipped(nextSkipped)
+    const next = queueProgress(practice, queue, nextSkipped).next
+    if (next) setForm(formFromQueue(next, categories))
+    else setForm((f) => ({ ...f, response: '' }))
+    timer.reset()
+  }
 
   /** 入力中の回答を記録する。成功したら true。 */
   const record = async (): Promise<boolean> => {
@@ -194,13 +227,19 @@ function AnswerView({
     try {
       const updated = await practiceApi.recordAnswer(practice.id, input)
       onUpdated(updated)
-      // 記録後：問題数を +1、カテゴリを先頭に戻し、回答欄を空にして計測をやり直す。
-      setForm((f) => ({
-        ...f,
-        questionNumber: String(input.questionNumber + 1),
-        area: categories[0]?.name ?? '',
-        response: '',
-      }))
+      // 記録後：まとめて復習中はリストの次の問題を入れる。
+      // それ以外は問題数を +1、カテゴリを先頭に戻し、回答欄を空にする。どちらも計測はやり直す。
+      const next = queue ? queueProgress(updated, queue, skipped).next : null
+      setForm((f) =>
+        next
+          ? formFromQueue(next, categories)
+          : {
+              ...f,
+              questionNumber: String(input.questionNumber + 1),
+              area: categories[0]?.name ?? '',
+              response: '',
+            },
+      )
       timer.reset()
       responseRef.current?.focus()
       return true
@@ -243,6 +282,43 @@ function AnswerView({
           <Notice>カテゴリがありません。学習を中断して、カテゴリ画面で登録してください。</Notice>
         )}
         <Notice>{error}</Notice>
+        {progress && (
+          <div className="queue-banner" role="status">
+            <div className="queue-head">
+              <strong>まとめて復習</strong>
+              <span className="muted small">
+                {progress.done} / {progress.total} 問を記録
+              </span>
+            </div>
+            <span
+              className="goal-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={progress.total}
+              aria-valuenow={progress.done}
+              aria-label="復習リストの進み具合"
+            >
+              <span
+                className={`goal-fill${progress.next ? '' : ' is-done'}`}
+                style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }}
+              />
+            </span>
+            <div className="queue-foot">
+              <span className="small">
+                {progress.next
+                  ? `いまの問題：${progress.next.title} 問${progress.next.questionNumber}（${progress.next.area}）`
+                  : skipped.size > 0
+                    ? `とばした ${skipped.size} 問以外はすべて記録しました。「採点へ」で答え合わせをしましょう。`
+                    : 'リストの問題はすべて記録しました。「採点へ」で答え合わせをしましょう。'}
+              </span>
+              {progress.next && (
+                <button type="button" className="link-button small" onClick={skip}>
+                  この問題をとばす
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <form className="answer-form" onSubmit={submit}>
           <label className="field span-2">
             <span>問題名称</span>

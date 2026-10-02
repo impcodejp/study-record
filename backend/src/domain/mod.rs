@@ -4,6 +4,8 @@
 //! 他の層に依存しない。
 
 pub mod error;
+pub mod exam_templates;
 pub mod models;
+pub mod study_plan;
 pub mod time;
 pub mod validation;

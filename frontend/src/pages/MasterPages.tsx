@@ -20,7 +20,8 @@ export function HomeRedirect() {
   if (exams.loading) return <Loading />
   if (exams.error) return <Notice>{exams.error}</Notice>
   const list = exams.data ?? []
-  if (list.length === 0) return <Navigate to="/exams" replace />
+  // 試験が無い（使い始めたばかりの）利用者は、はじめての設定へ案内する。
+  if (list.length === 0) return <Navigate to="/setup" replace />
   const last = loadLastExamId()
   const target = list.find((e) => e.id === last) ?? list[0]
   return <Navigate to={`/exams/${target.id}`} replace />
@@ -139,6 +140,11 @@ export function ExamsPage() {
       <PageHeader
         title="試験の管理"
         sub="学習する資格試験を登録します。カテゴリ・学習履歴・集計は試験ごとに分かれます。"
+        actions={
+          <Link className="button primary" to="/setup">
+            テンプレートから追加
+          </Link>
+        }
       />
       <Notice>{error}</Notice>
       <section className="card">

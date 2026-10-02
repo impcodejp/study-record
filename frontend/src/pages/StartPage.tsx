@@ -3,7 +3,7 @@
  */
 
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { errorMessage } from '../api/client'
 import { practiceApi } from '../api/endpoints'
@@ -12,13 +12,20 @@ import { useApp } from '../hooks/useApp'
 import { useExamId } from '../hooks/useExamId'
 import { saveSessionStart } from '../utils/session'
 
-/** 学習の開始画面。 */
+/**
+ * 学習の開始画面。
+ *
+ * 復習画面の「解き直す」からは `?title=…&number=…&area=…` 付きで開き、問題名称と問題数を入れた状態にする
+ * （カテゴリは回答画面の最初の 1 問で選んだ状態にする）。
+ */
 export function StartPage() {
   const examId = useExamId()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { setActivePracticeId } = useApp()
-  const [title, setTitle] = useState('')
-  const [firstNumber, setFirstNumber] = useState('1')
+  const [title, setTitle] = useState(params.get('title') ?? '')
+  const [firstNumber, setFirstNumber] = useState(params.get('number') ?? '1')
+  const isRetry = params.has('title')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -33,7 +40,7 @@ export function StartPage() {
     setError(null)
     try {
       const practice = await practiceApi.start(examId, title)
-      saveSessionStart(practice.id, number)
+      saveSessionStart(practice.id, number, params.get('area'))
       setActivePracticeId(practice.id)
       navigate('/session')
     } catch (err) {
@@ -45,7 +52,14 @@ export function StartPage() {
 
   return (
     <div className="narrow">
-      <PageHeader title="学習を始める" sub="問題集の名称と、最初に解く問題の番号を入力してください。" />
+      <PageHeader
+        title={isRetry ? '問題を解き直す' : '学習を始める'}
+        sub={
+          isRetry
+            ? '復習する問題を入れてあります。そのまま「開始する」を押してください。'
+            : '問題集の名称と、最初に解く問題の番号を入力してください。'
+        }
+      />
       <section className="card">
         <Notice>{error}</Notice>
         <form className="stack" onSubmit={submit}>

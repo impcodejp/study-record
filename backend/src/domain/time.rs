@@ -52,9 +52,29 @@ pub fn utc_string_to_jst_string(utc: &str) -> String {
     }
 }
 
+/// UTC で保存された日時文字列から、日本時間の日付を求める。解析できなければ `None`。
+pub fn utc_string_to_jst_date(utc: &str) -> Option<NaiveDate> {
+    NaiveDateTime::parse_from_str(utc, DB_DATETIME_FORMAT)
+        .ok()
+        .map(|naive| (naive + Duration::hours(9)).date())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utc_to_jst_date_crosses_midnight() {
+        assert_eq!(
+            utc_string_to_jst_date("2026-01-31 15:00:00"),
+            NaiveDate::from_ymd_opt(2026, 2, 1)
+        );
+        assert_eq!(
+            utc_string_to_jst_date("2026-01-31 14:59:59"),
+            NaiveDate::from_ymd_opt(2026, 1, 31)
+        );
+        assert_eq!(utc_string_to_jst_date("abc"), None);
+    }
 
     #[test]
     fn utc_to_jst_adds_nine_hours_across_date_boundary() {

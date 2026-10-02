@@ -2,6 +2,8 @@
 //!
 //! 検証に成功した場合は正規化済みの値（前後の空白を除去したものなど）を返す。
 
+use chrono::NaiveDate;
+
 use super::error::{AppError, AppResult};
 
 /// 問題名称の最大文字数。
@@ -22,6 +24,8 @@ pub const EMAIL_MAX_CHARS: usize = 254;
 pub const PASSWORD_MIN_CHARS: usize = 8;
 /// パスワードの最大文字数（ハッシュ計算の負荷を抑えるため）。
 pub const PASSWORD_MAX_CHARS: usize = 128;
+/// 1 日の目標問題数の上限。
+pub const DAILY_GOAL_MAX: i64 = 1000;
 
 /// 改行コード（CRLF / CR）を LF に統一する。
 fn normalize_newlines(raw: &str) -> String {
@@ -118,6 +122,28 @@ pub fn validate_exam_name(raw: &str) -> AppResult<String> {
     Ok(name.to_string())
 }
 
+/// 試験日（`YYYY-MM-DD`、任意）を検証する。空・未指定なら `None`（試験日を設定しない）。
+pub fn validate_exam_date(raw: Option<&str>) -> AppResult<Option<NaiveDate>> {
+    let text = raw.map(str::trim).unwrap_or_default();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| AppError::Validation("試験日は YYYY-MM-DD の形で入力してください。".into()))
+}
+
+/// 1 日の目標問題数（任意、1〜[`DAILY_GOAL_MAX`]）を検証する。未指定なら `None`（目標を設定しない）。
+pub fn validate_daily_goal(value: Option<i64>) -> AppResult<Option<i64>> {
+    match value {
+        None => Ok(None),
+        Some(goal) if (1..=DAILY_GOAL_MAX).contains(&goal) => Ok(Some(goal)),
+        Some(_) => Err(AppError::Validation(format!(
+            "1日の目標は1～{DAILY_GOAL_MAX}問で入力してください。"
+        ))),
+    }
+}
+
 /// 回答時間（0 以上の秒数）を検証する。
 pub fn validate_elapsed_seconds(value: i64) -> AppResult<i64> {
     if value < 0 {
@@ -186,6 +212,26 @@ pub fn validate_password(raw: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exam_date_is_optional_and_must_be_a_date() {
+        assert_eq!(validate_exam_date(None).unwrap(), None);
+        assert_eq!(validate_exam_date(Some(" ")).unwrap(), None);
+        assert_eq!(
+            validate_exam_date(Some("2026-10-18")).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 18)
+        );
+        assert!(validate_exam_date(Some("2026-02-30")).is_err());
+        assert!(validate_exam_date(Some("10/18")).is_err());
+    }
+
+    #[test]
+    fn daily_goal_must_be_in_range() {
+        assert_eq!(validate_daily_goal(None).unwrap(), None);
+        assert_eq!(validate_daily_goal(Some(20)).unwrap(), Some(20));
+        assert!(validate_daily_goal(Some(0)).is_err());
+        assert!(validate_daily_goal(Some(DAILY_GOAL_MAX + 1)).is_err());
+    }
 
     #[test]
     fn title_is_trimmed() {

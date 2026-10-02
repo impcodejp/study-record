@@ -5,13 +5,19 @@
 import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
+import { errorMessage } from '../api/client'
 import { examApi, practiceApi, reviewApi, type QuestionFilter } from '../api/endpoints'
-import type { Answer, Category, Practice } from '../api/types'
+import type { Answer, Category, Practice, QuestionItem } from '../api/types'
 import { CategorySelect, MemoEditor } from '../components/AnswerEditors'
+import { MasteryMeter } from '../components/StudyPlan'
 import { Empty, Loading, MultilineText, Notice, PageHeader, ResultBadge } from '../components/ui'
+import { useApp } from '../hooks/useApp'
 import { useExamId } from '../hooks/useExamId'
 import { useLoad } from '../hooks/useLoad'
-import { formatDateTime, formatRate, formatSeconds } from '../utils/format'
+import { formatDateTime, formatRate, formatSeconds, todayString } from '../utils/format'
+import { QUESTION_SORTS, reviewDueText, sortQuestions, type QuestionSort } from '../utils/studyPlan'
+import { REVIEW_QUEUE_MAX, saveReviewQueue } from '../utils/reviewQueue'
+import { saveSessionStart } from '../utils/session'
 
 /** 採点済み回答であとから変更できる項目。 */
 type AnswerPatch = Partial<Pick<Answer, 'area' | 'correctAnswer' | 'note'>>
@@ -260,26 +266,82 @@ function AnswerTable({
   )
 }
 
-/** 問題一覧・復習一覧・カテゴリ別の履歴（F-13〜F-15）。 */
+/** 正誤履歴の画面の URL。 */
+function historyUrl(examId: number, q: QuestionItem): string {
+  return `/exams/${examId}/history?title=${encodeURIComponent(q.title)}&questionNumber=${q.questionNumber}`
+}
+
+/** 問題を解き直す（問題名称・問題数・カテゴリを入れた状態で学習を始める）画面の URL。 */
+function retryUrl(examId: number, q: QuestionItem): string {
+  return `/exams/${examId}/start?title=${encodeURIComponent(q.title)}&number=${q.questionNumber}&area=${encodeURIComponent(q.area)}`
+}
+
+/**
+ * 問題一覧・復習・カテゴリ別の履歴（F-13〜F-15、今日の復習）。
+ *
+ * 復習画面（`review`）には 2 つの表示がある。
+ * - 今日の復習（既定）：忘却曲線にもとづく復習日が来た問題。復習日を過ぎた日数が長い順
+ * - 最新が不正解（`?view=wrong`）：元のシステムの復習一覧（F-14）
+ */
 export function QuestionsPage({ review = false }: { review?: boolean }) {
   const examId = useExamId()
   const navigate = useNavigate()
   const location = useLocation()
   const [params] = useSearchParams()
   const categoryId = Number(params.get('categoryId')) || null
+  const wrongOnly = review && params.get('view') === 'wrong'
   const filter: QuestionFilter = review
-    ? { kind: 'review' }
+    ? wrongOnly
+      ? { kind: 'review' }
+      : { kind: 'due' }
     : categoryId
       ? { kind: 'category', categoryId }
       : { kind: 'all' }
-  const questions = useLoad(() => reviewApi.questions(examId, filter), [examId, review, categoryId])
+  const questions = useLoad(() => reviewApi.questions(examId, filter), [examId, review, wrongOnly, categoryId])
   const categories = useLoad(() => examApi.categories(examId), [examId])
   const categoryName = categories.data?.find((c) => c.id === categoryId)?.name
+  const today = todayString()
+  const { setActivePracticeId } = useApp()
+  const [sort, setSort] = useState<QuestionSort>('default')
+  const [startError, setStartError] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
+  const sorted = useMemo(() => sortQuestions(questions.data ?? [], sort), [questions.data, sort])
+
+  /** 今日の復習の問題を 1 回の学習でまとめて解く（回答画面で 1 問ずつ自動で入力する）。 */
+  const startQueue = async () => {
+    // 画面に表示している順（並べ替えを反映）で、上から順に解く。
+    const items = sorted.slice(0, REVIEW_QUEUE_MAX).map((q) => ({
+      title: q.title,
+      questionNumber: q.questionNumber,
+      area: q.area,
+    }))
+    if (items.length === 0) return
+    setStarting(true)
+    setStartError(null)
+    try {
+      const practice = await practiceApi.start(examId, `今日の復習 ${today}`)
+      saveSessionStart(practice.id, items[0].questionNumber, items[0].area)
+      saveReviewQueue(practice.id, items)
+      setActivePracticeId(practice.id)
+      navigate('/session')
+    } catch (err) {
+      setStartError(errorMessage(err))
+    } finally {
+      setStarting(false)
+    }
+  }
 
   const title = review ? '復習' : categoryId ? `カテゴリ別の履歴：${categoryName ?? ''}` : '問題一覧'
   const sub = review
-    ? '最新の結果が不正解の問題です。正解すると一覧から外れます。'
+    ? wrongOnly
+      ? '最新の結果が不正解の問題です。正解すると一覧から外れます。'
+      : '忘れかけた頃に解き直すと記憶に残ります。正解するたびに次の復習までの間隔が延びます（1→3→7→14→30→60日）。'
     : '問題ごとの最新の結果です。選ぶと正誤履歴を表示します。'
+  const emptyText = review
+    ? wrongOnly
+      ? '最新の結果が不正解の問題はありません。'
+      : '今日復習する問題はありません。新しい問題に進みましょう。'
+    : '該当する問題がありません。'
 
   return (
     <div>
@@ -307,13 +369,62 @@ export function QuestionsPage({ review = false }: { review?: boolean }) {
           )
         }
       />
+      {review && (
+        <nav className="tabs" aria-label="復習の表示">
+          <Link className={`tab${wrongOnly ? '' : ' is-active'}`} to={`/exams/${examId}/review`} aria-current={wrongOnly ? undefined : 'page'}>
+            今日の復習
+          </Link>
+          <Link
+            className={`tab${wrongOnly ? ' is-active' : ''}`}
+            to={`/exams/${examId}/review?view=wrong`}
+            aria-current={wrongOnly ? 'page' : undefined}
+          >
+            最新が不正解
+          </Link>
+        </nav>
+      )}
+      {review && !wrongOnly && !!questions.data?.length && (
+        <section className="queue-start card">
+          <div>
+            <strong>今日の復習 {questions.data.length} 問</strong>
+            <p className="muted small">
+              {questions.data.length > REVIEW_QUEUE_MAX
+                ? `上から ${REVIEW_QUEUE_MAX} 問を、1 回の学習で順番に解きます。`
+                : 'すべての問題を、1 回の学習で順番に解きます。'}
+              問題名称・問題数・カテゴリは自動で入ります。
+            </p>
+          </div>
+          <button type="button" className="button primary" onClick={startQueue} disabled={starting}>
+            まとめて復習する
+          </button>
+          {startError && (
+            <div className="queue-start-error">
+              <Notice>{startError}</Notice>
+            </div>
+          )}
+        </section>
+      )}
       {questions.loading && !questions.data ? (
         <Loading />
       ) : questions.error ? (
         <Notice>{questions.error}</Notice>
       ) : !questions.data?.length ? (
-        <Empty>{review ? '復習が必要な問題はありません。' : '該当する問題がありません。'}</Empty>
+        <Empty>{emptyText}</Empty>
       ) : (
+        <>
+        <div className="table-tools">
+          <label className="inline-select">
+            <span>並べ替え</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value as QuestionSort)}>
+              {QUESTION_SORTS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {review && !wrongOnly && s.value === 'default' ? '復習を過ぎた日数が長い順' : s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="muted small">{questions.data.length} 問</span>
+        </div>
         <table className="table">
           <thead>
             <tr>
@@ -323,24 +434,23 @@ export function QuestionsPage({ review = false }: { review?: boolean }) {
               <th>最終回答日時</th>
               <th className="num">回答回数</th>
               <th className="num">正答率</th>
+              <th className="num">平均時間</th>
               <th>最新の正誤</th>
+              <th>習熟度</th>
+              <th>次の復習</th>
+              <th />
             </tr>
           </thead>
           <tbody>
-            {questions.data.map((q) => (
+            {sorted.map((q) => (
               <tr
                 key={`${q.title}-${q.questionNumber}`}
                 className="clickable"
-                onClick={() =>
-                  navigate(
-                    `/exams/${examId}/history?title=${encodeURIComponent(q.title)}&questionNumber=${q.questionNumber}`,
-                    { state: { back: location.pathname + location.search } },
-                  )
-                }
+                onClick={() => navigate(historyUrl(examId, q), { state: { back: location.pathname + location.search } })}
               >
                 <td>
                   <Link
-                    to={`/exams/${examId}/history?title=${encodeURIComponent(q.title)}&questionNumber=${q.questionNumber}`}
+                    to={historyUrl(examId, q)}
                     state={{ back: location.pathname + location.search }}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -352,13 +462,26 @@ export function QuestionsPage({ review = false }: { review?: boolean }) {
                 <td>{formatDateTime(q.answeredAt)}</td>
                 <td className="num">{q.attemptCount}</td>
                 <td className="num">{formatRate(q.correctCount, q.attemptCount)}</td>
+                <td className="num nowrap">{formatSeconds(q.averageSeconds)}</td>
                 <td>
                   <ResultBadge correct={q.correct} />
+                </td>
+                <td>
+                  <MasteryMeter level={q.masteryLevel} />
+                </td>
+                <td className={`nowrap ${q.nextReviewOn < today ? 'bad-text' : q.nextReviewOn === today ? 'accent-text' : ''}`}>
+                  {reviewDueText(q.nextReviewOn, today)}
+                </td>
+                <td className="actions">
+                  <Link className="button small" to={retryUrl(examId, q)} onClick={(e) => e.stopPropagation()}>
+                    解き直す
+                  </Link>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </>
       )}
     </div>
   )

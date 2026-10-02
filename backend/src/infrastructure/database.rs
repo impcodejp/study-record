@@ -102,6 +102,11 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX ix_answers_question ON answers(title, question_number);
     "#,
+    // v2: 試験ごとの学習目標（試験日・1 日の目標問題数。どちらも任意）
+    r#"
+    ALTER TABLE exams ADD COLUMN exam_date TEXT;
+    ALTER TABLE exams ADD COLUMN daily_goal INTEGER CHECK (daily_goal BETWEEN 1 AND 1000);
+    "#,
 ];
 
 /// SQLite に接続し、マイグレーションを適用したコネクションプールを返す。

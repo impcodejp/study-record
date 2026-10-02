@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "資格勉強回答正誤記録アプリ（基本情報技術者試験 科目B対策）のAPIサーバー"
 publish = false
+# `cargo run` で起動するプログラム（管理ツールは --bin create_user などで指定する）
+default-run = "study-record-server"
 
 [dependencies]
 anyhow = "1"

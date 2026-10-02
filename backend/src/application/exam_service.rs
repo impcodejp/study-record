@@ -7,9 +7,10 @@ use super::common::ensure_exam;
 use crate::{
     domain::{
         error::{AppError, AppResult},
+        exam_templates::find_template,
         models::{Category, Exam},
         time::now_jst_string,
-        validation::{validate_category_name, validate_exam_name},
+        validation::{validate_category_name, validate_daily_goal, validate_exam_date, validate_exam_name},
     },
     infrastructure::{
         database::{begin_write, is_unique_violation},
@@ -53,8 +54,22 @@ impl ExamService {
     }
 
     /// 試験を登録する。同時に「未分類」カテゴリを作り、すぐに学習を始められるようにする。
-    pub async fn create_exam(&self, user_id: i64, name: &str) -> AppResult<Vec<Exam>> {
+    ///
+    /// `template_key` を指定すると、テンプレートのカテゴリ（試験の出題分野）も「未分類」の後に作る。
+    pub async fn create_exam(
+        &self,
+        user_id: i64,
+        name: &str,
+        template_key: Option<&str>,
+    ) -> AppResult<Vec<Exam>> {
         let name = validate_exam_name(name)?;
+        let template = match template_key.map(str::trim).filter(|k| !k.is_empty()) {
+            Some(key) => Some(
+                find_template(key)
+                    .ok_or_else(|| AppError::Validation("試験のテンプレートが見つかりません。".into()))?,
+            ),
+            None => None,
+        };
         let mut tx = begin_write(&self.pool).await?;
         if repo::exam_name_exists(&mut tx, user_id, &name, None).await? {
             return Err(duplicate_exam());
@@ -65,8 +80,18 @@ impl ExamService {
             Err(err) => return Err(err.into()),
         };
         repo::insert_category(&mut tx, exam_id, DEFAULT_CATEGORY_NAME, Some(0)).await?;
+        if let Some(template) = template {
+            for (index, category) in template.categories.iter().enumerate() {
+                repo::insert_category(&mut tx, exam_id, category, Some(index as i64 + 1)).await?;
+            }
+        }
         tx.commit().await?;
-        info!(user_id, exam_id, "試験を登録しました");
+        info!(
+            user_id,
+            exam_id,
+            template = template.map_or("なし", |t| t.key),
+            "試験を登録しました"
+        );
         self.list_exams(user_id).await
     }
 
@@ -81,6 +106,30 @@ impl ExamService {
         repo::rename_exam(&mut tx, exam_id, &name).await?;
         tx.commit().await?;
         info!(user_id, exam_id, "試験名を変更しました");
+        self.list_exams(user_id).await
+    }
+
+    /// 試験の学習目標（試験日・1 日の目標問題数）を設定する。どちらも空にすると未設定に戻る。
+    pub async fn update_goal(
+        &self,
+        user_id: i64,
+        exam_id: i64,
+        exam_date: Option<&str>,
+        daily_goal: Option<i64>,
+    ) -> AppResult<Vec<Exam>> {
+        let exam_date = validate_exam_date(exam_date)?.map(|d| d.format("%Y-%m-%d").to_string());
+        let daily_goal = validate_daily_goal(daily_goal)?;
+        let mut tx = begin_write(&self.pool).await?;
+        ensure_exam(&mut tx, user_id, exam_id).await?;
+        repo::update_exam_goal(&mut tx, exam_id, exam_date.as_deref(), daily_goal).await?;
+        tx.commit().await?;
+        info!(
+            user_id,
+            exam_id,
+            exam_date = exam_date.as_deref().unwrap_or("未設定"),
+            daily_goal = daily_goal.unwrap_or(0),
+            "試験の学習目標を更新しました"
+        );
         self.list_exams(user_id).await
     }
 

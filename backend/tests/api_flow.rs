@@ -353,3 +353,151 @@ async fn security_rules() {
     let (status, _, _) = send(&app, "GET", "/api/auth/me", Some(&c), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn study_plan_flow() {
+    let app = setup("plan").await;
+    create_user(&app, "plan@example.com", "password-1").await;
+    let c = login(&app, "plan@example.com", "password-1").await;
+    let (_, exams, _) = send(&app, "POST", "/api/exams", Some(&c), Some(json!({ "name": "応用情報" }))).await;
+    let exam_id = exams[0]["id"].as_i64().unwrap();
+    let base = format!("/api/exams/{exam_id}");
+    let today = study_record_server::domain::time::today_jst();
+    let exam_day = (today + chrono::Duration::days(30)).format("%Y-%m-%d").to_string();
+
+    // 学習目標の設定（試験日・1 日の目標）。範囲外はエラー
+    let (status, exams, _) = send(&app, "PUT", &format!("{base}/goal"), Some(&c),
+        Some(json!({ "examDate": exam_day, "dailyGoal": 10 }))).await;
+    assert_eq!(status, StatusCode::OK, "{exams}");
+    assert_eq!(exams[0]["examDate"], exam_day.as_str());
+    assert_eq!(exams[0]["dailyGoal"], 10);
+    let (status, err, _) = send(&app, "PUT", &format!("{base}/goal"), Some(&c), Some(json!({ "dailyGoal": 0 }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"], "1日の目標は1～1000問で入力してください。");
+    let (status, _, _) = send(&app, "PUT", &format!("{base}/goal"), Some(&c), Some(json!({ "examDate": "2026/10/18" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 問1 は不正解、問2 は正解
+    let (_, p, _) = send(&app, "POST", &format!("{base}/practices"), Some(&c), Some(json!({ "title": "午前" }))).await;
+    let pid = p["id"].as_i64().unwrap();
+    let answers_uri = format!("/api/practices/{pid}/answers");
+    send(&app, "POST", &answers_uri, Some(&c), Some(answer("午前", 1, "未分類", "ア"))).await;
+    let (_, p, _) = send(&app, "POST", &answers_uri, Some(&c), Some(answer("午前", 2, "未分類", "イ"))).await;
+    // 問1 は不正解（メモを残す）、問2 は正解
+    let first = p["answers"][0]["id"].as_i64().unwrap();
+    let second = p["answers"][1]["id"].as_i64().unwrap();
+    send(&app, "POST", &format!("{answers_uri}/{first}/grade"), Some(&c),
+        Some(json!({ "correct": false, "correctAnswer": "ウ", "note": "単位の換算を忘れた" }))).await;
+    send(&app, "POST", &format!("{answers_uri}/{second}/grade"), Some(&c), Some(json!({ "correct": true }))).await;
+
+    // 見直しノート：メモを残した回答だけ
+    let (status, notes, _) = send(&app, "GET", &format!("{base}/notes"), Some(&c), None).await;
+    assert_eq!(status, StatusCode::OK, "{notes}");
+    let notes = notes.as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["questionNumber"], 1);
+    assert_eq!(notes[0]["note"], "単位の換算を忘れた");
+    assert_eq!(notes[0]["correctAnswer"], "ウ");
+
+    // 今日の状況：目標 10 問中 2 問、連続 1 日、復習はまだ来ていない
+    let (_, dash, _) = send(&app, "GET", &format!("{base}/dashboard"), Some(&c), None).await;
+    let t = &dash["today"];
+    assert_eq!(t["daysUntilExam"], 30);
+    assert_eq!(t["dailyGoal"], 10);
+    assert_eq!(t["answeredCount"], 2);
+    assert_eq!(t["correctCount"], 1);
+    assert_eq!(t["currentStreak"], 1);
+    assert_eq!(t["dueCount"], 0);
+    assert_eq!(t["questionCount"], 2);
+    // 準備度：習熟度 0 と 1 の平均 → 1/10 = 10%。習得まであと 5+4=9 回の正解、30 日あるので 1 日 1 問
+    let r = &dash["readiness"];
+    assert_eq!(r["percent"], 10.0);
+    assert_eq!(r["remainingCorrectAnswers"], 9);
+    assert_eq!(r["requiredDaily"], 1);
+    assert_eq!(r["areas"][0]["area"], "未分類");
+    assert_eq!(r["areas"][0]["questionCount"], 2);
+    assert!((r["recentDailyAverage"].as_f64().unwrap() - 2.0 / 14.0).abs() < 1e-9);
+    // 平均回答時間
+    let (_, qs_all, _) = send(&app, "GET", &format!("{base}/questions"), Some(&c), None).await;
+    assert_eq!(qs_all[0]["averageSeconds"], 30.0);
+    // 他人の見直しノートは見られない
+    create_user(&app, "peek@example.com", "password-3").await;
+    let peek = login(&app, "peek@example.com", "password-3").await;
+    let (status, _, _) = send(&app, "GET", &format!("{base}/notes"), Some(&peek), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(dash["heatmap"].as_array().unwrap().len(), 182);
+    assert_eq!(dash["heatmap"][181]["count"], 2);
+    let (_, qs, _) = send(&app, "GET", &format!("{base}/questions"), Some(&c), None).await;
+    let tomorrow = (today + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    let q1 = qs.as_array().unwrap().iter().find(|q| q["questionNumber"] == 1).unwrap();
+    assert_eq!(q1["masteryLevel"], 0);
+    assert_eq!(q1["nextReviewOn"], tomorrow.as_str());
+
+    // 5 日前に解いたことにすると、両方とも復習の時期が来る（過ぎた日数が長い問1 が先）
+    sqlx::query("UPDATE answers SET answered_at = datetime(answered_at, '-5 days')")
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let (status, due, _) = send(&app, "GET", &format!("{base}/questions?filter=due"), Some(&c), None).await;
+    assert_eq!(status, StatusCode::OK, "{due}");
+    let due = due.as_array().unwrap();
+    assert_eq!(due.len(), 2);
+    assert_eq!(due[0]["questionNumber"], 1);
+    assert_eq!(due[1]["questionNumber"], 2);
+    assert_eq!(due[1]["masteryLevel"], 1);
+    let (_, dash, _) = send(&app, "GET", &format!("{base}/dashboard"), Some(&c), None).await;
+    assert_eq!(dash["today"]["dueCount"], 2);
+    assert_eq!(dash["today"]["answeredCount"], 0);
+    assert_eq!(dash["today"]["currentStreak"], 0, "5 日空いたので連続記録は途切れる");
+    assert_eq!(dash["today"]["longestStreak"], 1);
+
+    // 目標を空にすると未設定に戻る
+    let (_, exams, _) = send(&app, "PUT", &format!("{base}/goal"), Some(&c), Some(json!({}))).await;
+    assert!(exams[0]["examDate"].is_null());
+    assert!(exams[0]["dailyGoal"].is_null());
+
+    // 他人の試験の目標は変えられない
+    create_user(&app, "other@example.com", "password-2").await;
+    let o = login(&app, "other@example.com", "password-2").await;
+    let (status, _, _) = send(&app, "PUT", &format!("{base}/goal"), Some(&o), Some(json!({ "dailyGoal": 5 }))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn exam_templates_flow() {
+    let app = setup("templates").await;
+
+    // テンプレートの一覧はログインしなくても取れる（紹介ページで使う）
+    let (status, templates, _) = send(&app, "GET", "/api/exam-templates", None, None).await;
+    assert_eq!(status, StatusCode::OK, "{templates}");
+    let takken = templates.as_array().unwrap().iter().find(|t| t["key"] == "takken").unwrap();
+    assert_eq!(takken["name"], "宅地建物取引士");
+
+    // テンプレートを指定して試験を作ると、「未分類」の後にテンプレートのカテゴリがそろう
+    create_user(&app, "tpl@example.com", "password-1").await;
+    let c = login(&app, "tpl@example.com", "password-1").await;
+    let (status, exams, _) = send(&app, "POST", "/api/exams", Some(&c),
+        Some(json!({ "name": "宅建 2026", "templateKey": "takken" }))).await;
+    assert_eq!(status, StatusCode::OK, "{exams}");
+    let exam_id = exams[0]["id"].as_i64().unwrap();
+    let (_, cats, _) = send(&app, "GET", &format!("/api/exams/{exam_id}/categories"), Some(&c), None).await;
+    let names: Vec<&str> = cats.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["未分類", "権利関係", "法令上の制限", "宅建業法", "税・その他"]);
+
+    // 存在しないテンプレートはエラー（試験も作られない）
+    let (status, err, _) = send(&app, "POST", "/api/exams", Some(&c),
+        Some(json!({ "name": "x", "templateKey": "nothing" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"], "試験のテンプレートが見つかりません。");
+    let (_, exams, _) = send(&app, "GET", "/api/exams", Some(&c), None).await;
+    assert_eq!(exams.as_array().unwrap().len(), 1);
+
+    // 準備度の推移は 8 週分（最後が今日）
+    let (_, dash, _) = send(&app, "GET", &format!("/api/exams/{exam_id}/dashboard"), Some(&c), None).await;
+    let history = dash["readiness"]["history"].as_array().unwrap();
+    assert_eq!(history.len(), 8);
+    assert_eq!(
+        history[7]["date"],
+        study_record_server::domain::time::today_jst().format("%Y-%m-%d").to_string()
+    );
+}

@@ -7,7 +7,10 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
-    domain::models::{Category, Exam},
+    domain::{
+        exam_templates::{ExamTemplate, EXAM_TEMPLATES},
+        models::{Category, Exam},
+    },
     presentation::{
         auth::AuthUser,
         error::{ApiJson, ApiResult},
@@ -28,18 +31,51 @@ pub struct ReorderRequest {
     category_ids: Vec<i64>,
 }
 
+/// 学習目標の入力。どちらも省略・空にすると未設定に戻す。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalRequest {
+    /// 試験日（`YYYY-MM-DD`）。
+    #[serde(default)]
+    exam_date: Option<String>,
+    /// 1 日の目標問題数。
+    #[serde(default)]
+    daily_goal: Option<i64>,
+}
+
 /// `GET /api/exams` 試験の一覧。
 pub async fn list_exams(State(state): State<AppState>, auth: AuthUser) -> ApiResult<Json<Vec<Exam>>> {
     Ok(Json(state.exams.list_exams(auth.user.id).await?))
 }
 
-/// `POST /api/exams` 試験の登録。
+/// 試験の登録の入力。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateExamRequest {
+    /// 試験名。
+    name: String,
+    /// 試験のテンプレートのキー（指定するとカテゴリも作る）。
+    #[serde(default)]
+    template_key: Option<String>,
+}
+
+/// `GET /api/exam-templates` 試験のテンプレートの一覧（ログイン不要。紹介ページでも使う）。
+pub async fn list_templates() -> Json<&'static [ExamTemplate]> {
+    Json(EXAM_TEMPLATES)
+}
+
+/// `POST /api/exams` 試験の登録（テンプレートを指定するとカテゴリも作る）。
 pub async fn create_exam(
     State(state): State<AppState>,
     auth: AuthUser,
-    ApiJson(body): ApiJson<NameRequest>,
+    ApiJson(body): ApiJson<CreateExamRequest>,
 ) -> ApiResult<Json<Vec<Exam>>> {
-    Ok(Json(state.exams.create_exam(auth.user.id, &body.name).await?))
+    Ok(Json(
+        state
+            .exams
+            .create_exam(auth.user.id, &body.name, body.template_key.as_deref())
+            .await?,
+    ))
 }
 
 /// `PUT /api/exams/{examId}` 試験名の変更。
@@ -50,6 +86,21 @@ pub async fn rename_exam(
     ApiJson(body): ApiJson<NameRequest>,
 ) -> ApiResult<Json<Vec<Exam>>> {
     Ok(Json(state.exams.rename_exam(auth.user.id, exam_id, &body.name).await?))
+}
+
+/// `PUT /api/exams/{examId}/goal` 学習目標（試験日・1 日の目標問題数）の設定。
+pub async fn update_goal(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(exam_id): Path<i64>,
+    ApiJson(body): ApiJson<GoalRequest>,
+) -> ApiResult<Json<Vec<Exam>>> {
+    Ok(Json(
+        state
+            .exams
+            .update_goal(auth.user.id, exam_id, body.exam_date.as_deref(), body.daily_goal)
+            .await?,
+    ))
 }
 
 /// `DELETE /api/exams/{examId}` 試験の削除。
