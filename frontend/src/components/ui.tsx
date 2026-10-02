@@ -4,6 +4,8 @@
 
 import type { ReactNode } from 'react'
 
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
+
 /** エラーや完了のお知らせ。 */
 export function Notice({ kind = 'error', children }: { kind?: 'error' | 'info' | 'success'; children: ReactNode }) {
   if (!children) return null
@@ -33,8 +35,9 @@ export function ResultBadge({ correct }: { correct: boolean | null }) {
   )
 }
 
-/** ページの見出し。右側に操作ボタンを置ける。 */
+/** ページの見出し。右側に操作ボタンを置ける。ブラウザのタブのタイトルも「見出し | 学習記録」にする。 */
 export function PageHeader({ title, sub, actions }: { title: string; sub?: ReactNode; actions?: ReactNode }) {
+  useDocumentTitle(title)
   return (
     <div className="page-header">
       <div>

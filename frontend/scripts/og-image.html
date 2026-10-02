@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  SNS で共有されたときに表示する画像（public/og-image.png、1200×630）の元。
+  文言を変えたら、次のコマンドで画像を作り直す（Windows の Microsoft Edge を使う）：
+    powershell -File frontend\scripts\make-og-image.ps1
+-->
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 1200px; height: 630px; }
+      body {
+        font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif;
+        background: linear-gradient(135deg, #1c5cab 0%, #2a78d6 55%, #3f9be8 100%);
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 88px;
+      }
+      .brand { display: flex; align-items: center; gap: 18px; font-size: 34px; font-weight: 700; }
+      .brand svg { width: 64px; height: 64px; }
+      h1 { font-size: 78px; line-height: 1.2; margin: 34px 0 22px; letter-spacing: 0.02em; }
+      p { font-size: 30px; margin: 0; opacity: 0.92; }
+      ul { display: flex; gap: 14px; list-style: none; padding: 0; margin: 40px 0 0; }
+      li { font-size: 24px; padding: 8px 20px; border-radius: 999px; background: rgb(255 255 255 / 0.18); border: 2px solid rgb(255 255 255 / 0.35); }
+    </style>
+  </head>
+  <body>
+    <div class="brand">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#fff" />
+        <path d="M18 33.5 27.5 43 47 22" fill="none" stroke="#2a78d6" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      学習記録
+    </div>
+    <h1>解いた問題を、<br />合格に変える。</h1>
+    <p>資格試験の勉強記録・復習アプリ　忘却曲線で合格までのペースがわかる</p>
+    <ul>
+      <li>今日の復習</li>
+      <li>合格準備度</li>
+      <li>見直しノート</li>
+      <li>宅建・簿記・FP・情報処理</li>
+    </ul>
+  </body>
+</html>

@@ -3,11 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>学習記録 - 資格試験の回答記録と復習</title>
+    <!--
+      seo:start 〜 seo:end は検索エンジン向けの情報。
+      紹介ページ以外（ログイン後の画面など）は検索結果に出さないため noindex にする。
+      紹介ページはビルド時に scripts/prerender.mjs がこの部分を差し替え、本文も HTML にする。
+    -->
+    <!-- seo:start -->
+    <title>学習記録 - 資格試験の勉強記録・復習アプリ</title>
     <meta
       name="description"
-      content="問題集の回答を記録して自己採点するだけ。忘れかけた問題を毎日教えてくれて、試験日までに何をどれだけ解けばよいかがわかる、資格試験の学習記録アプリです。"
+      content="問題集の回答を記録して自己採点するだけ。忘れかけた問題と、試験日までに必要なペースがわかる資格試験の学習記録アプリです。"
     />
+    <meta name="robots" content="noindex" />
+    <!-- seo:end -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- ホーム画面に追加して使うための設定 -->
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -15,13 +23,6 @@
     <meta name="theme-color" content="#2a78d6" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="学習記録" />
-    <!-- SNS で共有されたときの表示 -->
-    <meta property="og:title" content="学習記録 - 資格試験の回答記録と復習" />
-    <meta
-      property="og:description"
-      content="解いた問題を、合格に変える。忘れかけた問題と、合格までに必要なペースがわかる学習記録アプリ。"
-    />
-    <meta property="og:type" content="website" />
   </head>
   <body>
     <div id="root"></div>

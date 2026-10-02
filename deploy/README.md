@@ -173,6 +173,8 @@ cd C:\work\release\nginx
 powershell -ExecutionPolicy Bypass -File .\install-nginx.ps1 -Https -ServerName study.example.com
 ```
 
+`-ServerName` は、検索エンジン向けのファイル（紹介ページの正規の URL・SNS 共有の情報・`robots.txt`・`sitemap.xml`）のドメインにも使われます。公開後は [Google Search Console](https://search.google.com/search-console) にドメインを登録し、`https://study.example.com/sitemap.xml` を送信すると、検索結果に早く載ります。
+
 `app.ini` の `public_url = https://...` と `cookie_secure = true` も確認し、変えた場合はサービスを再起動します（`Restart-Service StudyRecordServer`）。
 
 ### 7. 公開後の確認

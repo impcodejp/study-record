@@ -24,7 +24,8 @@
     指定すると HTTPS 版（study-record-https.conf）を使う。省略すると http 版（study-record-http.conf）。
 
 .PARAMETER ServerName
-    公開するドメイン名（HTTPS 版の study.example.com を置き換える）。-Https のときは必須。
+    公開するドメイン名。-Https のときは必須。設定ファイルの study.example.com と、
+    検索エンジン向けのファイル（紹介ページの正規の URL、robots.txt、sitemap.xml）のドメインを置き換える。
 
 .PARAMETER LogPath
     ログファイル。省略すると C:\study-record\logs\SystemRunningLog.log（API サーバーのログと同じ）。
@@ -125,6 +126,24 @@ try {
     if (Test-Path $htmlDest) { Remove-Item -Recurse -Force $htmlDest }
     Copy-Item (Join-Path $PSScriptRoot 'html') $htmlDest -Recurse
     Write-Log "画面をコピーしました: $htmlDest"
+
+    # 検索エンジン向けのファイル（紹介ページの正規の URL・SNS 向けの情報、robots.txt、sitemap.xml）は、
+    # ビルド時に仮のドメインで作られているため、公開するドメインに書き換える。
+    $seoFiles = 'welcome\index.html', 'robots.txt', 'sitemap.xml'
+    if ($ServerName) {
+        $scheme = if ($Https) { 'https' } else { 'http' }
+        foreach ($file in $seoFiles) {
+            $target = Join-Path $htmlDest $file
+            if (-not (Test-Path $target)) { continue }
+            $text = [System.IO.File]::ReadAllText($target, [System.Text.Encoding]::UTF8)
+            $text = $text.Replace("https://$PlaceholderServerName", "${scheme}://$ServerName")
+            [System.IO.File]::WriteAllText($target, $text, (New-Object System.Text.UTF8Encoding $false))
+        }
+        Write-Log "検索エンジン向けのファイルの URL を ${scheme}://$ServerName にしました"
+    }
+    else {
+        Write-Log "-ServerName が無いため、検索エンジン向けのファイルの URL は仮のドメイン（$PlaceholderServerName）のままです（社内だけで使う場合は問題ありません）" 'WARN'
+    }
 
     # 2. 設定ファイルを置き換えてコピーする
     $source = if ($Https) { 'study-record-https.conf' } else { 'study-record-http.conf' }

@@ -4,71 +4,24 @@
  * 初めて訪れた人に、何ができて、なぜ合格に近づくのかを伝え、新規登録へ案内する。
  * 画面の見本は実際の画面と同じ部品の見た目で、数値は「表示例」と明記する。
  * 対応している試験の一覧はテンプレートの API から取得する（取得できなくてもページは表示する）。
+ *
+ * 検索エンジン向けに、ビルド時にこのページを HTML として書き出す（src/prerender.tsx）。
+ * そのときは API を使えないため、試験名を `initialExamNames` で受け取る。
  */
 
 import { Link } from 'react-router-dom'
 
 import { examApi } from '../api/endpoints'
+import { FEATURES, LANDING_TITLE, STEPS, faqItems } from '../content/landing'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useLoad } from '../hooks/useLoad'
 
-/** 主な機能。 */
-const FEATURES = [
-  {
-    title: '忘れかけた問題を、毎日教えてくれる',
-    body: '正解が続くほど次の復習までの間隔が延びる「間隔反復」で、問題ごとに復習日を自動で計算。今日解くべき問題だけが一覧になります。',
-  },
-  {
-    title: '復習リストを、そのまま解ける',
-    body: '「まとめて復習」なら、問題名称・番号・分野が 1 問ずつ自動で入ります。答えを書いて記録するだけで、次の問題へ進みます。',
-  },
-  {
-    title: '合格まであと何問かがわかる',
-    body: '習熟度から合格準備度を出し、試験日までに必要な 1 日の問題数と、今のペースを比べます。分野別の準備度で、伸ばすべき分野も一目で。',
-  },
-  {
-    title: '間違いを、自分だけの参考書に',
-    body: '採点のときに残した正解と解説は「見直しノート」に集まります。キーワードや分野で絞り込めるので、試験直前の見直しに最適です。',
-  },
-  {
-    title: '続けたくなる記録',
-    body: '連続学習日数、学習カレンダー、目標の達成度、実績バッジ。毎日の小さな積み重ねが目に見えます。',
-  },
-  {
-    title: '手持ちの問題集・過去問でそのまま',
-    body: '問題の本文は不要。問題集の名前と番号で管理するので、どの教材でも使えます。データは CSV で書き出せます。',
-  },
-]
-
-/** 使い方の 3 ステップ。 */
-const STEPS = [
-  { title: '試験を選ぶ', body: '主な資格は、出題分野のカテゴリがそろったテンプレートから始められます。' },
-  { title: '解いて、記録する', body: '問題集を解きながら、回答を記録。回答時間も自動で測ります。' },
-  { title: '採点するだけ', body: '自己採点すると、習熟度と次の復習日をアプリが計算します。' },
-]
-
-/** よくある質問。 */
-const FAQ = [
-  {
-    q: '問題集の本文を入力する必要はありますか？',
-    a: 'ありません。問題集の名称と問題番号、回答だけを記録します。お手持ちの問題集・過去問・模試にそのまま使えます。',
-  },
-  {
-    q: 'スマートフォンでも使えますか？',
-    a: '使えます。ブラウザのメニューから「ホーム画面に追加」すると、アプリのように起動できます。',
-  },
-  {
-    q: '一覧に無い試験でも使えますか？',
-    a: '使えます。試験名を入力して作り、カテゴリ（分野）を自由に登録できます。',
-  },
-  {
-    q: '記録したデータを持ち出せますか？',
-    a: '試験ごとに、採点済みの回答を CSV（Excel で開ける形式）で書き出せます。',
-  },
-]
-
 /** サービスの紹介ページ。 */
-export function LandingPage() {
+export function LandingPage({ initialExamNames = [] }: { initialExamNames?: string[] }) {
+  useDocumentTitle(LANDING_TITLE, { raw: true })
   const templates = useLoad(() => examApi.templates(), [])
+  const examNames = templates.data?.map((t) => t.name) ?? initialExamNames
+  const faq = faqItems(examNames)
 
   return (
     <div className="landing">
@@ -132,14 +85,14 @@ export function LandingPage() {
         </ol>
       </section>
 
-      {!!templates.data?.length && (
+      {examNames.length > 0 && (
         <section className="landing-section" aria-labelledby="templates-heading">
           <h2 id="templates-heading">テンプレートがある試験</h2>
           <p className="muted">出題分野のカテゴリがそろった状態で始められます。ほかの試験も自由に登録できます。</p>
           <ul className="chip-list">
-            {templates.data.map((t) => (
-              <li key={t.key} className="chip">
-                {t.name}
+            {examNames.map((name) => (
+              <li key={name} className="chip">
+                {name}
               </li>
             ))}
           </ul>
@@ -149,7 +102,7 @@ export function LandingPage() {
       <section className="landing-section" aria-labelledby="faq-heading">
         <h2 id="faq-heading">よくある質問</h2>
         <div className="faq">
-          {FAQ.map((item) => (
+          {faq.map((item) => (
             <details key={item.q} className="card">
               <summary>{item.q}</summary>
               <p>{item.a}</p>

@@ -11,12 +11,14 @@ import { errorMessage } from '../api/client'
 import { authApi } from '../api/endpoints'
 import { Notice, PageHeader } from '../components/ui'
 import { useApp } from '../hooks/useApp'
+import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
 /** パスワードの最小文字数（サーバー側の検証と合わせる）。 */
 const PASSWORD_MIN = 8
 
 /** ログイン前の画面の枠。 */
 function AuthCard({ title, children, footer }: { title: string; children: ReactNode; footer?: ReactNode }) {
+  useDocumentTitle(title)
   return (
     <div className="auth-page">
       <div className="auth-card">

@@ -6,16 +6,18 @@ import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
 import { useApp } from '../hooks/useApp'
+import { LandingPage } from '../pages/LandingPage'
 import { Loading } from './ui'
 
-/** ログインが必要な画面。未ログインなら紹介ページ（トップ）かログイン画面へ。学習中なら学習画面へ固定する。 */
+/** ログインが必要な画面。未ログインなら紹介ページ（トップ）かログイン画面。学習中なら学習画面へ固定する。 */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, activePracticeId } = useApp()
   const location = useLocation()
   if (loading) return <Loading />
-  // 未ログインでトップを開いた人には紹介ページを、それ以外の画面ならログイン画面を表示する。
+  // 未ログインでトップを開いた人には、URL を変えずに紹介ページを表示する（検索エンジンの正規の URL を / にするため）。
+  // それ以外の画面ならログイン画面へ。
   if (!user) {
-    if (location.pathname === '/') return <Navigate to="/welcome" replace />
+    if (location.pathname === '/') return <LandingPage />
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
   // 学習中（回答・採点の途中）は他の画面へ移動できない（F-04）。
