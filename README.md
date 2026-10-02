@@ -8,10 +8,14 @@
 | フロントエンド | React 19 + TypeScript + Vite（`frontend/`） |
 | API サーバー | Rust + Axum（`backend/`） |
 | データベース | SQLite（`data/study_record.sqlite3`） |
-| Web サーバー | nginx（`nginx/study-record.conf`） |
+| Web サーバー | nginx（設定は `deploy/nginx/`） |
+| 本番での常時起動 | API サーバーは Windows サービス、nginx はタスク スケジューラ |
 | ログ | `logs/SystemRunningLog.log`（約 2MB で `SystemRunningLog1.log` に切り替え） |
 
-詳しい仕様・設計判断は [docs/仕様書.md](docs/仕様書.md) を参照してください。
+- **本番環境への配置（Windows サービス + nginx）は [deploy/README.md](deploy/README.md) を参照してください。**
+- 詳しい仕様・設計判断は [docs/仕様書.md](docs/仕様書.md) を参照してください。
+
+このファイルには、開発 PC での準備・起動・テストの手順をまとめています。
 
 ## フォルダ構成
 
@@ -28,16 +32,19 @@ ProjectRoot/
 ├─ frontend/                画面（React）
 │  └─ src/{api,hooks,components,pages,utils}
 ├─ config/app.ini.example   設定ファイルの見本
-├─ nginx/                   nginx の設定の見本（http 版・HTTPS 版）と証明書更新後のスクリプト
-├─ deploy/                  Ubuntu（systemd）用のサービス設定の見本
-└─ docs/仕様書.md
+├─ deploy/                  本番環境への配置に使うもの（手順は deploy/README.md）
+│  ├─ build-release.ps1     ビルドして release フォルダを作る（開発 PC で実行）
+│  ├─ windows-service/      【Windows サービス用】API サーバーの登録・更新・解除のスクリプト
+│  ├─ nginx/                【nginx 用】nginx の設定（http 版・HTTPS 版）と配置スクリプト
+│  └─ ubuntu/               将来 Ubuntu へ移行するときの systemd 設定の見本
+├─ docs/仕様書.md
+└─ release/                 build-release.ps1 の出力（Git には登録しない）
 ```
 
-## 必要なもの
+## 必要なもの（開発 PC）
 
 - Rust 1.85 以上（`rustup` でインストール）
 - Node.js 20 以上
-- （本番）nginx
 
 ## 初回セットアップ
 
@@ -80,150 +87,20 @@ cargo clippy --manifest-path backend/Cargo.toml --all-targets
 cd frontend; npm run build; npm run lint
 ```
 
-## 本番環境への配置（インターネット公開・HTTPS）
+## 本番環境への配置
 
-ブラウザとの暗号化（HTTPS）は nginx が受け持ち、API サーバーは PC の内部（127.0.0.1）だけで待ち受けます。
-証明書は Let's Encrypt（無料、90日ごとに自動更新）を使います。
+サーバー PC（Windows 11）では、API サーバーを **Windows サービス**、nginx を **タスク スケジューラ** で常時起動します。
+手順は [deploy/README.md](deploy/README.md) にまとめています。概要は次のとおりです。
 
-```text
-ブラウザ ──HTTPS(443)──> nginx ──HTTP(PC内部のみ)──> API サーバー(127.0.0.1:8080)
-```
-
-### 事前に用意するもの
-
-- 独自ドメイン（例：`study.example.com`）と、そのドメインをサーバーのグローバル IP に向ける DNS の設定（A レコード）
-- ルーター・ファイアウォールで **80 番と 443 番だけ** をサーバーへ通す設定
-  （80 番は証明書の取得・更新と https への転送に必要。**8080 番は外部に開けない**）
-- 社内ネットワークから公開する場合は、情報システム部門の許可
-
-### 1. ビルドする
-
-```powershell
-cargo build --release --manifest-path backend/Cargo.toml
-cd frontend; npm ci; npm run build; cd ..
-```
-
-### 2. `config/app.ini` を本番用にする
-
-```ini
-[server]
-bind = 127.0.0.1:8080
-public_url = https://study.example.com
-cookie_secure = true
-trust_proxy = true
-```
-
-`[smtp]` を設定し、パスワードは環境変数 `APP_SMTP_PASSWORD` で渡します。
-
-### 3. 証明書を取得する
-
-#### Windows（win-acme）
-
-1. [win-acme](https://www.win-acme.com/) をダウンロードし、`C:\win-acme` などに展開する
-2. 証明書の確認用フォルダ（例：`C:\nginx\acme`）と、証明書の保存先（例：`C:\nginx\certs`）を作る
-3. `nginx/study-record-https.conf` のドメイン名とパスを書き換え、**いったん 443 番の server ブロックをコメントにして** nginx を起動する
-   （証明書がまだ無いと nginx が起動できないため。80 番だけで確認用ファイルに応答させる）
-4. 管理者権限の PowerShell で証明書を取得する
-   ```powershell
-   C:\win-acme\wacs.exe --source manual --host study.example.com `
-     --validation filesystem --webroot C:\nginx\acme `
-     --store pemfiles --pemfilespath C:\nginx\certs `
-     --installation script --script "C:\path\to\ProjectRoot\nginx\reload-nginx.bat"
-   ```
-   win-acme は更新用のタスクを Windows のタスク スケジューラに自動で登録します。
-   更新のたびに `nginx\reload-nginx.bat` が nginx に新しい証明書を読み込ませます（中の `NGINX_HOME` を書き換えておく）。
-   オプション名は win-acme のバージョンで変わることがあるため、`wacs.exe --help` でも確認してください。
-5. `C:\nginx\certs` にできたファイル名を確認し、`ssl_certificate`（`*-chain.pem`）と
-   `ssl_certificate_key`（`*-key.pem`）に指定する。443 番の server ブロックを元に戻し、`nginx -t` で確認してから `nginx -s reload`
-
-#### Ubuntu（certbot）
-
-```bash
-sudo apt install nginx certbot libssl-dev pkg-config
-sudo mkdir -p /var/www/acme
-# study-record-https.conf のパスを Linux 用に書き換えて /etc/nginx/conf.d/ に置く
-#   root（acme-challenge）: /var/www/acme
-#   ssl_certificate     : /etc/letsencrypt/live/study.example.com/fullchain.pem
-#   ssl_certificate_key : /etc/letsencrypt/live/study.example.com/privkey.pem
-# （Windows と同じく、初回は 443 番の server ブロックをコメントにしてから起動する）
-sudo certbot certonly --webroot -w /var/www/acme -d study.example.com \
-  --deploy-hook "systemctl reload nginx"
-```
-
-certbot は自動更新のタイマーを登録します。`sudo certbot renew --dry-run` で更新を試せます。
-
-### 4. API サーバーを常駐させる
-
-#### Windows（exe 自身をサービスとして登録する）
-
-exe は単体で動きます（SQLite を内蔵し、Visual C++ の実行用ファイルも取り込み済みのため、追加のインストールは不要）。
-サービスとして動くときは、**ホームフォルダ**（既定は exe のあるフォルダ）を作業フォルダにし、
-設定・データ・ログはすべてその中に置きます。
-
-1. ホームフォルダを作り、exe と設定ファイルを置く
-   ```text
-   C:\study-record\
-   ├─ study-record-server.exe      （backend\target\release からコピー）
-   ├─ config\app.ini               （config\app.ini.example をコピーして編集）
-   ├─ data\                        （install 時に自動で作成）
-   └─ logs\SystemRunningLog.log    （install 時に自動で作成）
-   ```
-   旧データの取り込みやユーザー作成をする場合は、`import_legacy.exe` / `create_user.exe` も同じフォルダに置き、
-   そのフォルダで実行します（同じ `config\app.ini` を使うため）。
-2. **管理者として開いた** PowerShell で登録する
-   ```powershell
-   cd C:\study-record
-   .\study-record-server.exe install
-   # ホームフォルダを exe と別の場所にする場合
-   .\study-record-server.exe install --home D:\study-record-data
-   ```
-   登録の内容：
-   - サービス名 `StudyRecordServer`、Windows の起動時に自動で開始する
-   - 権限の低い組み込みアカウント **LocalService** で動かす（書き込み権限は `data` と `logs` だけに与える）
-   - 異常終了したら 10 秒後に自動で再起動する（3 回まで。24 時間で回数を数え直す）
-3. 開始・停止・状態の確認
-   ```powershell
-   sc start StudyRecordServer
-   sc stop StudyRecordServer       # 処理中の要求を終えてから止まる
-   sc query StudyRecordServer
-   ```
-   「サービス」画面（services.msc）からも操作できます。起動できないときは `logs\SystemRunningLog.log` を確認してください。
-4. SMTP のパスワードの渡し方（どちらか）
-   - `config\app.ini` に書き、ファイルを管理者とサービスだけが読めるようにする
-     ```powershell
-     icacls C:\study-record\config\app.ini /inheritance:r /grant "*S-1-5-32-544:F" "*S-1-5-19:R"
-     ```
-   - サービス専用の環境変数として登録する（再起動後に有効）
-     ```powershell
-     reg add HKLM\SYSTEM\CurrentControlSet\Services\StudyRecordServer /v Environment /t REG_MULTI_SZ /d "APP_SMTP_PASSWORD=ここにパスワード" /f
-     sc stop StudyRecordServer; sc start StudyRecordServer
-     ```
-5. exe を新しい版に入れ替えるときは、`sc stop` → exe を上書き → `sc start`。
-   登録を解除するときは `.\study-record-server.exe uninstall`（データとログは残ります）。
-
-#### Ubuntu（systemd）
-
-`deploy/study-record.service` を使います（手順はファイルの先頭に記載）。
-ホームフォルダは `/opt/study-record`、SMTP のパスワードは `/etc/study-record/env`（root だけが読めるファイル）に
-`APP_SMTP_PASSWORD=...` の形で書きます。停止時は SIGTERM を受けて、処理中の要求を終えてから止まります。
-
-### 5. 公開後の確認
-
-- `http://study.example.com` を開くと `https://` に転送される
-- `https://study.example.com/api/health` が `ok` を返す
-- `https://study.example.com:8080` など、nginx 以外のポートには外部から接続できない
-- [SSL Labs の診断](https://www.ssllabs.com/ssltest/) で評価が A 以上になる
-- ログイン後、ブラウザの開発者ツールで Cookie `sr_session` に `Secure` `HttpOnly` `SameSite=Strict` が付いている
-
-### 社内だけで使う場合
-
-`nginx/study-record.conf`（http 版）を使うか、社内の認証局の証明書を `study-record-https.conf` に指定します。
-2 つの設定ファイルは、どちらか一方だけを include してください（両方を読み込むと nginx が起動しません）。
+1. 開発 PC で `deploy\build-release.ps1` を実行し、`release` フォルダ（`windows-service\` と `nginx\` に分かれる）を作る
+2. `release` をサーバー PC へコピーし、管理者の PowerShell で `windows-service\install-service.ps1` を実行する
+3. 同じく `nginx\install-nginx.ps1` を実行する（インターネット公開時は証明書を取得してから `-Https` を付けて再実行）
 
 ## 旧システム（科目B対策アプリ）のデータ取り込み
 
 旧 DB（`practice.sqlite3` / `practice.sqlite3.user-<ID>.sqlite3`）を、ファイルごとに取り込めます。
 先に取り込み先のユーザーを作っておいてください。
+本番のサーバー PC では、`C:\study-record` で `import_legacy.exe` を直接実行します（同じ `config\app.ini` を使うため）。
 
 ```powershell
 cargo run --manifest-path backend/Cargo.toml --bin import_legacy -- C:\old\practice.sqlite3 user@example.com

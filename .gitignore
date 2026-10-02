@@ -12,3 +12,6 @@ logs/
 backend/target/
 frontend/node_modules/
 frontend/dist/
+
+# 配置用にまとめたもの（deploy/build-release.ps1 の出力）
+release/

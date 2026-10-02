@@ -1,13 +1,14 @@
 @echo off
 rem =====================================================================
-rem 証明書の更新後に nginx へ新しい証明書を読み込ませる（Windows 用）
+rem 【nginx 用】証明書の更新後に nginx へ新しい証明書を読み込ませる（Windows 用）
 rem
 rem win-acme の「更新後に実行するスクリプト」に指定して使う。
-rem NGINX_HOME は nginx.exe のあるフォルダに書き換える。
+rem install-nginx.ps1 -Https が nginx.exe と同じフォルダにコピーする（書き換えは不要）。
 rem 結果は logs\cert-renew.log に追記する。
 rem =====================================================================
 setlocal
-set NGINX_HOME=C:\nginx
+rem このファイルのあるフォルダ（＝ nginx.exe のあるフォルダ）
+set NGINX_HOME=%~dp0
 
 cd /d "%NGINX_HOME%" || exit /b 1
 echo %date% %time% 証明書の更新を受けて nginx を再読み込みします >> logs\cert-renew.log
